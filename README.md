@@ -1,6 +1,6 @@
 # Fragment-grounded 3D ink labels (Vesuvius Challenge, villa #192)
 
-**Author:** Uri Kartoun ([github.com/kartoun](https://github.com/kartoun)) · **Status:** work in progress (October 2026) · **License:** MIT
+**Author:** Uri Kartoun ([github.com/kartoun](https://github.com/kartoun)) · **Status:** work in progress (October 2026). The first result is negative; see Findings. · **License:** MIT
 
 This repo tests whether the IR-imaged **fragments** can serve as an independent reference for *where in depth* ink sits, the open question in [ScrollPrize/villa#192](https://github.com/ScrollPrize/villa/issues/192) ("Accurate 3d ink labels").
 
@@ -41,7 +41,16 @@ Run order: `python download_frag1.py [out_dir]`, then steps 1–4. Edit `DATA` /
    - Per-column normalisation removes most of it, so much of the contrast looks like surface geometry rather than a separable ink layer ([figure](outputs/step2/aligned_profile.png)).
    - Brightness alone can't label ink depth.
 3. **Surface detection** is reliable on ~61% of the fragment (68% of ink columns) with the simple steepest-drop rule ([figure](outputs/step3/surface_map.png), [cross-sections](outputs/step3/cross_sections.png)).
-4. **Training comparison:** in progress, results to follow. In the first seed, the 2D ink-detection scores were similar for both label sets. The surface-band model put about 92% of its ink probability inside the surface band, versus about 40% for the flat model.
+4. **Training comparison** (same 3D U-Net, 4,000 steps, 2 seeds per arm). Held-out rows 3298–4432 never seen in training, with a 96-row buffer. The 2D map is the max over the supervised depth window, scored against the IR-based outline with stroke edges ignored ([summary.csv](outputs/step4/summary.csv), [depth profiles](outputs/step4/depth_profiles.png)):
+
+   | labels | ROC AUC | avg. precision | best F0.5 | Spearman vs IR darkness | ink probability inside surface band |
+   |---|---|---|---|---|---|
+   | flat, mean of 2 seeds | **0.750** | **0.486** | **0.507** | **0.299** | 40% |
+   | surface band, mean of 2 seeds | 0.725 | 0.475 | 0.484 | 0.283 | 92% |
+
+   - The surface-band labels did **not** improve 2D ink detection; they were slightly worse on every metric in both seeds. That agrees with khj1222's result on scroll segments, now on IR-grounded fragment labels.
+   - They did confine predictions to the surface band. But the depth profiles show the band model gives high probability inside the band to **non-ink columns as well** (≈0.52 vs ≈0.63 for ink columns). What it mainly learned is *where the surface is*. That is the failure mode #192 warns about, so a surface band built from an intensity rule doesn't give "ink-only" 3D labels.
+   - **Caveats:** the model is small and short-trained (AUC 0.75; khj1222's models are much stronger). There is one held-out band, two seeds, and one fragment.
 
 ## Limits
 
