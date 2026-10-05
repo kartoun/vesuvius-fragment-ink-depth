@@ -10,7 +10,8 @@ Reference (no model involved):
   - per-pixel exposed-surface layer and its reliability (surface.tif,
     surface_reliable.tif from step3_build_labels.py)
 
-Scores, each with a 95% CI from a block bootstrap over 256x256 tiles:
+Scores, each with a 95% CI from a block bootstrap over 256x256 tiles. AUC, AP and F0.5 use
+every evaluation pixel, via 1024-level score histograms (exact for uint8 inputs):
   (a) ink map:       max over depth -> 2D map; ROC AUC, average precision, best F0.5
                      vs the IR-based outline (stroke edges ignored); Spearman vs IR darkness.
   (b) depth:         per ink column, offset of the prediction's peak (argmax) and
@@ -37,7 +38,6 @@ import zarr
 from PIL import Image
 from scipy import ndimage
 from scipy.stats import spearmanr
-from sklearn.metrics import average_precision_score, precision_recall_curve, roc_auc_score
 
 from common import DATA, LABELS_OUT, OUT, load_png_mask
 
@@ -48,7 +48,7 @@ CORE_ERODE = 3       # px removed inside strokes for "ink core", for (b)/(c)
 BAND = (-4, 5)       # surface band, layers relative to surface (inclusive)
 OFFSETS = np.arange(-15, 16)
 TILE = 256
-PER_TILE = 400       # pixels sampled per tile and class for (a)
+NBINS = 1024         # score quantisation for histogram-based AUC / AP (exact for uint8 inputs)
 N_BOOT = 300
 ROWS = 256           # rows read per block
 
@@ -85,26 +85,49 @@ class Volume:
 
 
 # ---------------------------------------------------------------- helpers
-def best_f05(y, s):
-    p, r, _ = precision_recall_curve(y, s)
-    return float((1.25 * p * r / np.maximum(0.25 * p + r, 1e-9)).max())
-
-
 def ci(values):
-    v = np.asarray([x for x in values if np.isfinite(x)])
+    v = np.asarray(values, dtype=float)
+    v = v[np.isfinite(v)]
     return [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))] if v.size else [None, None]
 
 
-def boot(tiles, stat, rng):
-    """Resample tiles with replacement and recompute stat on the pooled samples."""
-    ids = np.unique(tiles)
-    out = []
-    for _ in range(N_BOOT):
-        pick = rng.choice(ids, ids.size)
-        counts = np.bincount(np.searchsorted(ids, pick), minlength=ids.size)
-        w = counts[np.searchsorted(ids, tiles)]
-        out.append(stat(w))
-    return ci(out)
+def boot_matrix(n_tiles, rng):
+    """N_BOOT x n_tiles counts: how often each tile is drawn in each tile-level resample."""
+    return rng.multinomial(n_tiles, np.full(n_tiles, 1.0 / n_tiles), size=N_BOOT).astype(np.float64)
+
+
+def tile_hist(values, tiles, n_tiles):
+    """Per-tile histogram of values quantised to NBINS levels in [0, 1] -> (n_tiles, NBINS)."""
+    q = np.clip(np.rint(values * (NBINS - 1)), 0, NBINS - 1).astype(np.int64)
+    return np.bincount(tiles * NBINS + q, minlength=n_tiles * NBINS).reshape(n_tiles, NBINS).astype(np.float64)
+
+
+def auc_from_hist(pos, neg):
+    """ROC AUC from score histograms (ties count half); works on stacked rows."""
+    cneg = np.cumsum(neg, axis=-1) - neg  # negatives strictly below each bin
+    num = (pos * (cneg + 0.5 * neg)).sum(axis=-1)
+    den = pos.sum(axis=-1) * neg.sum(axis=-1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return num / den
+
+
+def ap_from_hist(pos, neg):
+    """Average precision from score histograms, thresholds at every bin (high to low)."""
+    tp = np.cumsum(pos[..., ::-1], axis=-1)
+    fp = np.cumsum(neg[..., ::-1], axis=-1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        prec = tp / (tp + fp)
+        dr = pos[..., ::-1] / pos.sum(axis=-1, keepdims=True)
+    return np.nansum(prec * dr, axis=-1)
+
+
+def f05_from_hist(pos, neg):
+    tp = np.cumsum(pos[::-1])
+    fp = np.cumsum(neg[::-1])
+    with np.errstate(invalid="ignore", divide="ignore"):
+        p, r = tp / (tp + fp), tp / pos.sum()
+        f = 1.25 * p * r / (0.25 * p + r)
+    return float(np.nanmax(f))
 
 
 # ---------------------------------------------------------------- main
@@ -167,85 +190,71 @@ def score(args):
         print(f"\rscored rows {b - r0}/{r1 - r0}", end="", flush=True)
     print()
 
-    # (a) ink map: stratified sample per tile and class
-    pos, neg = [], []
-    for cls, store in ((True, pos), (False, neg)):
-        m = eval_a & (ink == cls)
-        idx = rng.permutation(np.flatnonzero(m))
-        t = tile_id.ravel()[idx]
-        # group by tile (random order within tile), keep up to PER_TILE per tile
-        srt = np.argsort(t, kind="stable")
-        idx, t = idx[srt], t[srt]
-        _, first = np.unique(t, return_index=True)
-        bounds = list(first[1:]) + [idx.size]
-        keep = np.concatenate([np.arange(f, min(f + PER_TILE, e)) for f, e in zip(first, bounds)])
-        store.append(idx[keep])
-    sel = np.concatenate(pos + neg)
-    y = np.r_[np.ones(pos[0].size), np.zeros(neg[0].size)].astype(np.uint8)
-    sc = score2d.ravel()[sel]
-    dark = -ir.ravel()[sel] if ir is not None else None
-    tiles = tile_id.ravel()[sel]
+    # tile bookkeeping, shared by every bootstrap below
+    n_tiles = int(tile_id.max()) + 1
+    C = boot_matrix(n_tiles, rng)
+    tid = tile_id.ravel()
 
-    def wauc(w):
-        return roc_auc_score(y, sc, sample_weight=w) if (w * y).sum() and (w * (1 - y)).sum() else np.nan
-
-    def wap(w):
-        return average_precision_score(y, sc, sample_weight=w) if (w * y).sum() else np.nan
-
+    # (a) ink map: all evaluation pixels, via per-tile score histograms
+    idx_pos = np.flatnonzero((eval_a & ink).ravel())
+    idx_neg = np.flatnonzero((eval_a & ~ink).ravel())
+    s2 = score2d.ravel()
+    hp = tile_hist(s2[idx_pos], tid[idx_pos], n_tiles)
+    hn = tile_hist(s2[idx_neg], tid[idx_neg], n_tiles)
+    P, N = hp.sum(axis=0), hn.sum(axis=0)
+    BP, BN = C @ hp, C @ hn
+    sub = rng.choice(np.r_[idx_pos, idx_neg], min(idx_pos.size + idx_neg.size, 400_000), replace=False)
     res_a = dict(
-        n_pixels=int(sel.size), n_ink=int(y.sum()),
-        auc=float(roc_auc_score(y, sc)), auc_ci=boot(tiles, wauc, rng),
-        ap=float(average_precision_score(y, sc)), ap_ci=boot(tiles, wap, rng),
-        best_f05=best_f05(y, sc),
-        spearman_ir_darkness=float(spearmanr(sc, dark).statistic) if dark is not None else None,
+        n_pixels=int(idx_pos.size + idx_neg.size), n_ink=int(idx_pos.size),
+        auc=float(auc_from_hist(P, N)), auc_ci=ci(auc_from_hist(BP, BN)),
+        ap=float(ap_from_hist(P, N)), ap_ci=ci(ap_from_hist(BP, BN)),
+        best_f05=f05_from_hist(P, N),
+        spearman_ir_darkness=float(spearmanr(s2[sub], -ir.ravel()[sub]).statistic) if ir is not None else None,
     )
 
     # (b) depth of ink columns
     ci_idx = np.flatnonzero(core.ravel())
     am = argmax_off.ravel()[ci_idx]
     ce = centroid_off.ravel()[ci_idx]
-    ct = tile_id.ravel()[ci_idx]
+    ct = tid[ci_idx]
     ok = np.isfinite(ce)
     am, ce, ct = am[ok], ce[ok], ct[ok]
+    n_col = np.bincount(ct, minlength=n_tiles).astype(np.float64)
 
-    def wshare(vals, k):
-        return lambda w: float((w * (np.abs(vals) <= k)).sum() / max(w.sum(), 1))
+    def share(vals, k):
+        hit = np.bincount(ct, weights=(np.abs(vals) <= k).astype(np.float64), minlength=n_tiles)
+        return float(hit.sum() / max(n_col.sum(), 1)), ci((C @ hit) / (C @ n_col))
 
+    w3, w3_ci = share(am, 3)
+    w5, w5_ci = share(am, 5)
+    c3, c3_ci = share(ce, 3)
+    c5, c5_ci = share(ce, 5)
     res_b = dict(
         n_columns=int(am.size),
         argmax_offset_median=float(np.median(am)), argmax_offset_iqr=[float(np.percentile(am, 25)), float(np.percentile(am, 75))],
-        centroid_offset_median=float(np.median(ce)),
-        share_argmax_within_3=float((np.abs(am) <= 3).mean()), share_argmax_within_3_ci=boot(ct, wshare(am, 3), rng),
-        share_argmax_within_5=float((np.abs(am) <= 5).mean()), share_argmax_within_5_ci=boot(ct, wshare(am, 5), rng),
+        centroid_offset_median=float(np.median(ce)), centroid_offset_iqr=[float(np.percentile(ce, 25)), float(np.percentile(ce, 75))],
+        share_argmax_within_3=w3, share_argmax_within_3_ci=w3_ci,
+        share_argmax_within_5=w5, share_argmax_within_5_ci=w5_ci,
+        share_centroid_within_3=c3, share_centroid_within_3_ci=c3_ci,
+        share_centroid_within_5=c5, share_centroid_within_5_ci=c5_ci,
     )
 
     # (c) ink vs surface inside the band
-    bi = band_mean.ravel()[np.flatnonzero(core.ravel())]
-    bc = band_mean.ravel()[np.flatnonzero(clear.ravel())]
-    ti = tile_id.ravel()[np.flatnonzero(core.ravel())]
-    tc = tile_id.ravel()[np.flatnonzero(clear.ravel())]
+    ii, cc = np.flatnonzero(core.ravel()), np.flatnonzero(clear.ravel())
+    bi, bc = band_mean.ravel()[ii], band_mean.ravel()[cc]
     oki, okc = np.isfinite(bi), np.isfinite(bc)
-    bi, ti, bc, tc = bi[oki], ti[oki], bc[okc], tc[okc]
-    allt = np.r_[ti, tc]
-    lab = np.r_[np.ones(bi.size), np.zeros(bc.size)]
-    vals = np.r_[bi, bc]
-    sub = rng.choice(vals.size, min(vals.size, 400_000), replace=False)
-
-    def wshare_surface(w):
-        wi, wc = w[: bi.size], w[bi.size:]
-        mi = (wi * bi).sum() / max(wi.sum(), 1)
-        mc = (wc * bc).sum() / max(wc.sum(), 1)
-        return mc / mi if mi > 0 else np.nan
-
-    def wband_auc(w):
-        ws = w[sub]
-        return roc_auc_score(lab[sub], vals[sub], sample_weight=ws) if (ws * lab[sub]).sum() else np.nan
-
+    bi, ti, bc, tc = bi[oki], tid[ii][oki], bc[okc], tid[cc][okc]
+    si = np.bincount(ti, weights=bi, minlength=n_tiles); ni = np.bincount(ti, minlength=n_tiles).astype(np.float64)
+    sc_ = np.bincount(tc, weights=bc, minlength=n_tiles); nc = np.bincount(tc, minlength=n_tiles).astype(np.float64)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        share_boot = ((C @ sc_) / (C @ nc)) / ((C @ si) / (C @ ni))
+    hbi, hbc = tile_hist(bi, ti, n_tiles), tile_hist(bc, tc, n_tiles)
     mi, mc = float(bi.mean()), float(bc.mean())
     res_c = dict(
         band=list(BAND), mean_in_band_ink=mi, mean_in_band_clear=mc,
-        surface_share=mc / mi if mi > 0 else None, surface_share_ci=boot(allt, wshare_surface, rng),
-        band_auc=float(roc_auc_score(lab[sub], vals[sub])), band_auc_ci=boot(allt, wband_auc, rng),
+        surface_share=mc / mi if mi > 0 else None, surface_share_ci=ci(share_boot),
+        band_auc=float(auc_from_hist(hbi.sum(axis=0), hbc.sum(axis=0))),
+        band_auc_ci=ci(auc_from_hist(C @ hbi, C @ hbc)),
     )
     prof = {k: (prof_sum[k] / np.maximum(prof_n[k], 1)).tolist() for k in prof_sum}
 

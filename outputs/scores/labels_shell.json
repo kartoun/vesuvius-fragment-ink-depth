@@ -7,20 +7,20 @@
   4432
  ],
  "a_ink_map": {
-  "n_pixels": 57940,
-  "n_ink": 21496,
-  "auc": 0.9029354298474135,
+  "n_pixels": 4014091,
+  "n_ink": 1025011,
+  "auc": 0.9057619869445304,
   "auc_ci": [
-   0.8795855112054566,
-   0.9205114472792227
+   0.8937291212457343,
+   0.9172759934241341
   ],
-  "ap": 0.8778936418832978,
+  "ap": 0.8596519311276983,
   "ap_ci": [
-   0.8474530996951656,
-   0.9020888330066628
+   0.8293572329919774,
+   0.8788594691384276
   ],
-  "best_f05": 0.95403577565317,
-  "spearman_ir_darkness": 0.6716293103511017
+  "best_f05": 0.9556119242836252,
+  "spearman_ir_darkness": 0.6413075586050841
  },
  "b_depth": {
   "n_columns": 831821,
@@ -30,6 +30,10 @@
    -4.0
   ],
   "centroid_offset_median": 0.5,
+  "centroid_offset_iqr": [
+   0.5,
+   0.5
+  ],
   "share_argmax_within_3": 0.0,
   "share_argmax_within_3_ci": [
    0.0,
@@ -37,6 +41,16 @@
   ],
   "share_argmax_within_5": 1.0,
   "share_argmax_within_5_ci": [
+   1.0,
+   1.0
+  ],
+  "share_centroid_within_3": 1.0,
+  "share_centroid_within_3_ci": [
+   1.0,
+   1.0
+  ],
+  "share_centroid_within_5": 1.0,
+  "share_centroid_within_5_ci": [
    1.0,
    1.0
   ]

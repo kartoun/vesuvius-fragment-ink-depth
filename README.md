@@ -32,6 +32,7 @@ Fragment 1, PHercParis2Fr47, 54 keV exposed-surface volume: 65 layers of 8181 ×
 | `step4_train_compare.py` | Same small 3D U-Net trained on each label set; scored on a held-out band of rows |
 | `khj_recipes.py` | khj1222's v2/v3/v4 label recipes rebuilt on a fragment, for scoring |
 | `predict_fragment.py` | Run a trained model over a whole fragment (cross-fragment test) |
+| `step5_lofo.py` | Leave-one-fragment-out baseline: train on five fragments, predict and score the sixth (resumable, ~7 h for 12 runs) |
 
 Run order: `python download_fragments.py Frag1 [Frag2 ...]`, then steps 1–4. Set `DATA_ROOT` in `common.py` to your data folder; `step3_build_labels.py --frag FragN` builds the surface map and labels for any fragment. Step 4 needs a CUDA GPU; it took about 27 min per run on a Quadro RTX 4000 (8 GB).
 
@@ -55,7 +56,7 @@ Run order: `python download_fragments.py Frag1 [Frag2 ...]`, then steps 1–4. S
    - **Caveats:** the model is small and short-trained (AUC 0.75; khj1222's models are much stronger). There is one held-out band, two seeds, and one fragment.
 
 5. **Scoring with confidence intervals** (`score_3d.py`, held-out rows, 95% CIs from a block bootstrap over 256 × 256 tiles):
-   - The 2D gap between flat and surface-band models is **within noise**: AUC 0.73 [0.68, 0.78] for flat vs 0.71–0.73 [0.66, 0.77] for the band.
+   - The 2D gap between flat and surface-band models is **within noise**: AUC 0.75 [0.69, 0.81] for flat vs 0.72–0.73 [0.67, 0.78] for the band.
    - Both kinds of model give clear-papyrus columns about 81–83% of the in-band signal that ink columns get (*surface share*).
    - So the band labels changed *where* the model puts its output (99.8% of ink-column peaks within ±5 layers of the surface, vs 15% for flat), but not *how ink-specific* it is.
    - Full table: [outputs/scores/summary.md](outputs/scores/summary.md).
@@ -80,14 +81,14 @@ Run order: `python download_fragments.py Frag1 [Frag2 ...]`, then steps 1–4. S
 
    | fragment | AUC flat / band | peak within ±5 of surface, flat / band | surface share, flat / band |
    |---|---|---|---|
-   | Frag1 (held-out rows) | 0.73 / 0.73 | 15% / 99.8% | 0.81 / 0.82 |
-   | Frag2 | 0.58 / 0.60 | 35% / 97% | 0.89 / 0.84 |
+   | Frag1 (held-out rows) | 0.75 / 0.73 | 15% / 99.8% | 0.81 / 0.82 |
+   | Frag2 | 0.59 / 0.61 | 35% / 97% | 0.89 / 0.84 |
    | Frag3 | 0.62 / 0.62 | 20% / 99.7% | 0.89 / 0.90 |
-   | Frag4 (no aligned IR) | 0.58 / 0.57 | 13% / 99.7% | 0.96 / 0.97 |
-   | Frag5 | 0.67 / 0.68 | 18% / 99.4% | 0.81 / 0.71 |
-   | Frag6 | 0.68 / 0.66 | 18% / 99.4% | 0.85 / 0.86 |
+   | Frag4 (no aligned IR) | 0.59 / 0.58 | 13% / 99.7% | 0.96 / 0.97 |
+   | Frag5 | 0.72 / 0.71 | 18% / 99.4% | 0.81 / 0.71 |
+   | Frag6 | 0.71 / 0.68 | 18% / 99.4% | 0.85 / 0.86 |
 
-   - A model trained on one fragment transfers poorly (AUC 0.57–0.68). Inside the surface band its output on unseen fragments is mostly surface (surface share 0.81–0.97). That is the risk #192 describes, measured on five independent fragments.
+   - A model trained on one fragment transfers poorly (AUC 0.58–0.72). Inside the surface band its output on unseen fragments is mostly surface (surface share 0.81–0.97). That is the risk #192 describes, measured on five independent fragments.
    - Surface-band labels reliably move predictions to the surface but don't make them consistently more ink-specific. Frag5 and Frag2 hint in that direction, with overlapping or barely separated CIs.
    - **Caveat:** one small, briefly trained model from a single fragment. A train-on-five / test-on-the-sixth round is the fair baseline and is next.
 
