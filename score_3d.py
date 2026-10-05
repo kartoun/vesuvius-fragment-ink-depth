@@ -115,7 +115,7 @@ def score(args):
     frag = load_png_mask("mask.png", args.data)
     ink = load_png_mask("inklabels.png", args.data) & frag
     ir_path = args.data / "ir.png"  # not published for every fragment (e.g. Frag4)
-    ir = np.array(Image.open(ir_path), dtype=np.float32) if ir_path.exists() else None
+    ir = np.array(Image.open(ir_path).convert("L"), dtype=np.float32) if ir_path.exists() else None  # Frag5/6 IR is RGBA
     surf = tifffile.imread(args.ref / "surface.tif").astype(np.int32) - vol.z_offset
     reliable = tifffile.imread(args.ref / "surface_reliable.tif") > 0
     assert (H, W) == frag.shape, f"volume is {H}x{W}, fragment is {frag.shape}"

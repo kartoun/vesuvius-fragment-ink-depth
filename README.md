@@ -31,6 +31,7 @@ Fragment 1, PHercParis2Fr47, 54 keV exposed-surface volume: 65 layers of 8181 ×
 | `step3_build_labels.py` | Surface map plus two 3D label volumes (Zarr; 0 = not ink, 1 = ink, 2 = ignore): **flat** (2D outline through all layers) and **surface band** (ink only from −4 to +5 layers around the surface). Both ignore the same voxels, so depth is the only difference. |
 | `step4_train_compare.py` | Same small 3D U-Net trained on each label set; scored on a held-out band of rows |
 | `khj_recipes.py` | khj1222's v2/v3/v4 label recipes rebuilt on a fragment, for scoring |
+| `predict_fragment.py` | Run a trained model over a whole fragment (cross-fragment test) |
 
 Run order: `python download_fragments.py Frag1 [Frag2 ...]`, then steps 1–4. Set `DATA_ROOT` in `common.py` to your data folder; `step3_build_labels.py --frag FragN` builds the surface map and labels for any fragment. Step 4 needs a CUDA GPU; it took about 27 min per run on a Quadro RTX 4000 (8 GB).
 
@@ -74,6 +75,21 @@ Run order: `python download_fragments.py Frag1 [Frag2 ...]`, then steps 1–4. S
      - On this fragment the measured band moves per cell, but its movement tracks the independently located surface **no better than a constant band does**. That is one candidate explanation for why v4 lost to v3 in khj1222's training runs.
      - Both bands sit about 3.6 layers (~12 µm) on the air side of the detected surface. It could be ink on top of the fibres, a surface detector biased inward, or a model keying on the edge itself; we can't yet tell these apart.
    - **Limits:** our model rather than theirs, and one fragment.
+
+7. **Cross-fragment test** (`predict_fragment.py`). The Frag1-trained models (seed 0) were applied to Frag2–Frag6, which they never saw, using each fragment's own normalisation, and scored on the whole fragment. 95% CIs are in [outputs/scores/summary.md](outputs/scores/summary.md).
+
+   | fragment | AUC flat / band | peak within ±5 of surface, flat / band | surface share, flat / band |
+   |---|---|---|---|
+   | Frag1 (held-out rows) | 0.73 / 0.73 | 15% / 99.8% | 0.81 / 0.82 |
+   | Frag2 | 0.58 / 0.60 | 35% / 97% | 0.89 / 0.84 |
+   | Frag3 | 0.62 / 0.62 | 20% / 99.7% | 0.89 / 0.90 |
+   | Frag4 (no aligned IR) | 0.58 / 0.57 | 13% / 99.7% | 0.96 / 0.97 |
+   | Frag5 | 0.67 / 0.68 | 18% / 99.4% | 0.81 / 0.71 |
+   | Frag6 | 0.68 / 0.66 | 18% / 99.4% | 0.85 / 0.86 |
+
+   - A model trained on one fragment transfers poorly (AUC 0.57–0.68). Inside the surface band its output on unseen fragments is mostly surface (surface share 0.81–0.97). That is the risk #192 describes, measured on five independent fragments.
+   - Surface-band labels reliably move predictions to the surface but don't make them consistently more ink-specific. Frag5 and Frag2 hint in that direction, with overlapping or barely separated CIs.
+   - **Caveat:** one small, briefly trained model from a single fragment. A train-on-five / test-on-the-sixth round is the fair baseline and is next.
 
 ## Scoring tool: `score_3d.py`
 
