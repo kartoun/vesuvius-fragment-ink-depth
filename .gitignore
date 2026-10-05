@@ -1,0 +1,9 @@
+# data and large artifacts live outside the repo (D:\DBBun\data\vesuvius)
+data/
+*.pt
+*.zarr/
+__pycache__/
+# local working notes, not for publication
+drafts/
+prior_work/
+outputs/step4_runs.log

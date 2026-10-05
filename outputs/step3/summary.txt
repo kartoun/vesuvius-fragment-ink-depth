@@ -1,0 +1,7 @@
+fragment pixels: 29,142,840; ink (2D outline): 5,339,364
+reliable surface: 61.3% of fragment, 68.1% of ink outline
+surface layer (smoothed, fragment): median 29, 5-95% 19-33
+voxels [not ink, ink, ignore]:
+  flat : [1530743955, 225747145, 1609581350]
+  shell: [1721760770, 34730330, 1609581350]
+ink voxels shell/flat: 0.154

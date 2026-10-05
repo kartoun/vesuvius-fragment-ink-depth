@@ -1,0 +1,8 @@
+numpy
+scipy
+scikit-learn
+matplotlib
+pillow
+tifffile
+zarr>=3
+torch  # CUDA build recommended for step 4
