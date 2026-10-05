@@ -17,7 +17,7 @@ On scroll segments, every existing 3D ink label depends on an ink model or on a 
 
 ## Data
 
-Fragment 1, PHercParis2Fr47, 54 keV exposed-surface volume: 65 layers of 8181 × 6330, plus `ir.png`, `inklabels.png` and `mask.png`. It comes from the EduceLab-Scrolls dataset via the Vesuvius Challenge open data (CC BY-NC 4.0). The data is not redistributed here; `download_frag1.py` fetches it (~6.4 GB).
+Fragment 1, PHercParis2Fr47, 54 keV exposed-surface volume: 65 layers of 8181 × 6330, plus `ir.png`, `inklabels.png` and `mask.png`. It comes from the EduceLab-Scrolls dataset via the Vesuvius Challenge open data (CC BY-NC 4.0). The data is not redistributed here; `download_fragments.py` fetches it (~6.4 GB for Frag1; ~47 GB for Frag1–6).
 
 > Data used in this work were obtained from the EduceLab-Scrolls dataset: Parsons, S., Parker, C. S., Chapman, C., Hayashida, M., & Seales, W. B. (2023). *EduceLab-Scrolls: Verifiable Recovery of Text from Herculaneum Papyri using X-ray CT.* arXiv. https://doi.org/10.48550/arXiv.2304.02084
 
@@ -25,13 +25,14 @@ Fragment 1, PHercParis2Fr47, 54 keV exposed-surface volume: 65 layers of 8181 ×
 
 | Script | What it does |
 |---|---|
-| `download_frag1.py` | Fetch the Frag1 surface volume, IR photo, ink labels and mask |
+| `download_fragments.py` | Fetch the surface volume, IR photo, ink labels and mask for Frag1–Frag6 |
 | `step1_ink_depth_profile.py` | Ink vs clear-papyrus contrast per fixed layer |
 | `step2_surface_aligned_profile.py` | The same, aligned to each pixel's papyrus→air transition |
 | `step3_build_labels.py` | Surface map plus two 3D label volumes (Zarr; 0 = not ink, 1 = ink, 2 = ignore): **flat** (2D outline through all layers) and **surface band** (ink only from −4 to +5 layers around the surface). Both ignore the same voxels, so depth is the only difference. |
 | `step4_train_compare.py` | Same small 3D U-Net trained on each label set; scored on a held-out band of rows |
+| `khj_recipes.py` | khj1222's v2/v3/v4 label recipes rebuilt on a fragment, for scoring |
 
-Run order: `python download_frag1.py [out_dir]`, then steps 1–4. Edit `DATA` / `LABELS_OUT` in `common.py` to match your paths. Step 4 needs a CUDA GPU; it took about 27 min per run on a Quadro RTX 4000 (8 GB).
+Run order: `python download_fragments.py Frag1 [Frag2 ...]`, then steps 1–4. Set `DATA_ROOT` in `common.py` to your data folder; `step3_build_labels.py --frag FragN` builds the surface map and labels for any fragment. Step 4 needs a CUDA GPU; it took about 27 min per run on a Quadro RTX 4000 (8 GB).
 
 ## Findings so far
 
@@ -57,6 +58,22 @@ Run order: `python download_frag1.py [out_dir]`, then steps 1–4. Edit `DATA` /
    - Both kinds of model give clear-papyrus columns about 81–83% of the in-band signal that ink columns get (*surface share*).
    - So the band labels changed *where* the model puts its output (99.8% of ink-column peaks within ±5 layers of the surface, vs 15% for flat), but not *how ink-specific* it is.
    - Full table: [outputs/scores/summary.md](outputs/scores/summary.md).
+
+6. **khj1222's label recipes on a fragment** (`khj_recipes.py`). This is a port of the label construction in [khj1222/vesuvius-challenge](https://github.com/khj1222/vesuvius-challenge) (MIT): plane v2, constant band v3, and per-cell measured band v4 from occlusion profiling with the centroid estimator and their default thresholds.
+   - **Differences from the original:** the occlusion model is our step-4 flat-label model, not their checkpoint; blanked slabs are set to the global mean; there are no annotated regions on a fragment, so the fallback is the fragment median.
+   - **The port reproduces their headline geometry:** median band centre z 32.6, half-width 4.0 (theirs on w00: 32.5 and 4.0), with 68% of ink in confidently measured cells (theirs: 86%).
+   - **Scored against the exposed surface** ([numbers](outputs/khj_recipes/depth_vs_surface.txt), [cross-section](outputs/khj_recipes/cross_sections.png)):
+
+     | ink columns, reliable surface | band centre − surface: median | spread (MAD) | within ±3 layers |
+     |---|---|---|---|
+     | v3 constant | +3.6 | 2.0 | 46% |
+     | v4 measured | +3.6 | 2.0 | 42% |
+
+     corr(v4 centre, surface) = 0.16 over the whole fragment and 0.40 on the held-out rows.
+   - **Reading:**
+     - On this fragment the measured band moves per cell, but its movement tracks the independently located surface **no better than a constant band does**. That is one candidate explanation for why v4 lost to v3 in khj1222's training runs.
+     - Both bands sit about 3.6 layers (~12 µm) on the air side of the detected surface. It could be ink on top of the fibres, a surface detector biased inward, or a model keying on the edge itself; we can't yet tell these apart.
+   - **Limits:** our model rather than theirs, and one fragment.
 
 ## Scoring tool: `score_3d.py`
 

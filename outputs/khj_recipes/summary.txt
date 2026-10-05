@@ -1,0 +1,9 @@
+occlusion model: outputs/step4/flat_seed0
+cells_measured: 1341
+cells_with_ink: 2076
+ink_share_measured: 0.6758527755737305
+median_center: 32.61115074157715
+median_half_width: 4.0
+center_p5_p95: [27.323747634887695, 35.229576110839844]
+v3 constant band: centre 32.61, half-width 4.00
+v4 centre minus exposed surface (ink px, reliable surface): median +3.61, IQR +1.62 to +5.61

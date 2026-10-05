@@ -1,0 +1,8 @@
+whole fragment           khj v3 constant (32.61)          centre-surface median +3.61  IQR [+1.61,+5.61]  MAD 2.00  |off|<=3: 45.9%  |off|<=5: 70.8%
+whole fragment           khj v4 measured                  centre-surface median +3.61  IQR [+1.62,+5.61]  MAD 2.00  |off|<=3: 42.4%  |off|<=5: 69.1%
+whole fragment           ours: band centre (surface+0.5)  centre-surface median +0.50  IQR [+0.50,+0.50]  MAD 0.00  |off|<=3: 100.0%  |off|<=5: 100.0%
+whole fragment           corr(v4 centre, surface) = 0.158   n=3,473,033
+held-out rows 3298-4432  khj v3 constant (32.61)          centre-surface median +3.61  IQR [+1.61,+5.61]  MAD 2.00  |off|<=3: 47.8%  |off|<=5: 74.3%
+held-out rows 3298-4432  khj v4 measured                  centre-surface median +3.33  IQR [+1.61,+4.97]  MAD 1.71  |off|<=3: 46.1%  |off|<=5: 75.3%
+held-out rows 3298-4432  ours: band centre (surface+0.5)  centre-surface median +0.50  IQR [+0.50,+0.50]  MAD 0.00  |off|<=3: 100.0%  |off|<=5: 100.0%
+held-out rows 3298-4432  corr(v4 centre, surface) = 0.398   n=831,821

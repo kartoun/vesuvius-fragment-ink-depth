@@ -6,16 +6,34 @@ import tifffile
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
-DATA = Path("D:/DBBun/data/vesuvius/Frag1")
-LABELS_OUT = Path("D:/DBBun/data/vesuvius/Frag1_3d_labels")
+DATA_ROOT = Path("D:/DBBun/data/vesuvius")
 OUT = Path(__file__).parent / "outputs"
 
 # label values in the 3D volumes
 NOT_INK, INK, IGNORE = 0, 1, 2
 
 
+def frag_paths(name):
+    """(data folder, label/reference folder) for a fragment such as 'Frag1'."""
+    return DATA_ROOT / name, DATA_ROOT / f"{name}_3d_labels"
+
+
+DATA, LABELS_OUT = frag_paths("Frag1")
+
+
 def load_png_mask(name, data=DATA):
     return np.array(Image.open(data / name)) > 0
+
+
+class LazyStack:
+    """Surface-volume layers as memory-mapped uint16 TIFFs; read row blocks on demand."""
+
+    def __init__(self, data=DATA):
+        self.layers = [tifffile.memmap(p, mode="r") for p in sorted((data / "surface_volume").glob("*.tif"))]
+        self.shape = (len(self.layers), *self.layers[0].shape)
+
+    def rows(self, r0, r1):
+        return np.stack([m[r0:r1] for m in self.layers])
 
 
 def load_stack(data=DATA, verbose=True):

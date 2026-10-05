@@ -1,4 +1,4 @@
-"""Step 3: Build surface-following 3D ink labels for Frag1 (plus the flat baseline).
+"""Step 3: Build surface-following 3D ink labels for one fragment (plus the flat baseline).
 
 1. Surface map: for every pixel, the layer where intensity drops fastest from papyrus
    to air (smoothed along depth), searched in layers SEARCH. Pixels where the drop sits
@@ -11,11 +11,12 @@
    unreliable surface are ignored, so the only difference between them is depth.
 
 Outputs:
-  D:/DBBun/data/vesuvius/Frag1_3d_labels/{surface.tif, labels_flat.zarr, labels_shell.zarr}
-  outputs/step3/{surface_map.png, cross_sections.png, summary.txt}
+  D:/DBBun/data/vesuvius/<FragN>_3d_labels/{surface.tif, surface_reliable.tif, labels_flat.zarr, labels_shell.zarr}
+  outputs/step3[_FragN]/{surface_map.png, cross_sections.png, summary.txt}
 
-Usage:  python step3_build_labels.py
+Usage:  python step3_build_labels.py [--frag FragN] [--search LO HI]
 """
+import argparse
 import warnings
 
 import matplotlib
@@ -26,7 +27,7 @@ import tifffile
 import zarr
 from scipy import ndimage
 
-from common import DATA, IGNORE, INK, LABELS_OUT, NOT_INK, OUT, load_png_mask, load_stack
+from common import IGNORE, INK, NOT_INK, OUT, LazyStack, frag_paths, load_png_mask
 
 SEARCH = (10, 56)      # layers searched for the papyrus->air drop
 SHELL = (-4, 5)        # ink layers relative to surface, inclusive (from step 2)
@@ -43,7 +44,7 @@ def surface_map(stack, frag):
     surf = np.zeros((H, W), np.float32)
     lo, hi = SEARCH
     for r in range(0, H, ROWS):
-        c = stack[:, r:r + ROWS].astype(np.float32)
+        c = stack.rows(r, r + ROWS).astype(np.float32)
         c = ndimage.gaussian_filter1d(c, 1.5, axis=0)
         g = np.diff(c, axis=0)[lo:hi]
         surf[r:r + ROWS] = lo + np.argmin(g, axis=0)
@@ -71,7 +72,7 @@ def surface_map(stack, frag):
     return surf, np.rint(smooth).astype(np.int16), reliable
 
 
-def build(stack_shape, frag, ink, surf, reliable):
+def build(stack_shape, frag, ink, surf, reliable, labels_out):
     Z, H, W = stack_shape
     edge = ndimage.binary_dilation(ink, iterations=EDGE_BAND) & ~ndimage.binary_erosion(ink, iterations=EDGE_BAND)
     ignore2d = ~frag | edge
@@ -80,10 +81,10 @@ def build(stack_shape, frag, ink, surf, reliable):
     flat[ignore2d] = IGNORE
     flat[ink & ~reliable] = IGNORE  # same supervised columns in both label sets
 
-    LABELS_OUT.mkdir(parents=True, exist_ok=True)
+    labels_out.mkdir(parents=True, exist_ok=True)
     kw = dict(shape=(Z, H, W), chunks=(Z, 256, 256), dtype="uint8", fill_value=IGNORE, overwrite=True)
-    zf = zarr.create_array(store=str(LABELS_OUT / "labels_flat.zarr"), **kw)
-    zs = zarr.create_array(store=str(LABELS_OUT / "labels_shell.zarr"), **kw)
+    zf = zarr.create_array(store=str(labels_out / "labels_flat.zarr"), **kw)
+    zs = zarr.create_array(store=str(labels_out / "labels_shell.zarr"), **kw)
     z = np.arange(Z)[:, None, None]
     counts = np.zeros((2, 3), np.int64)
     for r in range(0, H, ROWS):
@@ -103,7 +104,7 @@ def build(stack_shape, frag, ink, surf, reliable):
     return zf, zs, counts
 
 
-def figures(stack, surf, reliable, frag, zf, zs, out):
+def figures(stack, surf, reliable, frag, zf, zs, out, name):
     fig, ax = plt.subplots(1, 2, figsize=(11, 7))
     s = np.where(frag, surf, np.nan)
     im = ax[0].imshow(s[::4, ::4], cmap="viridis")
@@ -118,15 +119,16 @@ def figures(stack, surf, reliable, frag, zf, zs, out):
     plt.close(fig)
 
     # cross-sections through the rows with the most ink
-    ink_rows = np.argsort((zf[32] == INK).sum(axis=1))[-1]
+    zmid = stack.shape[0] // 2
+    ink_rows = int(np.argsort((zf[zmid] == INK).sum(axis=1))[-1])
     rows = [ink_rows, ink_rows - 600, ink_rows + 600]
     fig, ax = plt.subplots(len(rows), 3, figsize=(16, 2.6 * len(rows)))
     for i, r in enumerate(rows):
         r = int(np.clip(r, 0, stack.shape[1] - 1))
-        cols = np.flatnonzero(zf[32, r] == INK)
+        cols = np.flatnonzero(zf[zmid, r] == INK)
         c0 = int(np.clip((cols.mean() if cols.size else stack.shape[2] / 2) - 400, 0, stack.shape[2] - 800))
         cs = slice(c0, c0 + 800)
-        ct = stack[:, r, cs].astype(np.float32)
+        ct = stack.rows(r, r + 1)[:, 0, cs].astype(np.float32)
         for j, (title, lab) in enumerate((("CT", None), ("flat labels", zf[:, r, cs]), ("surface-shell labels", zs[:, r, cs]))):
             ax[i, j].imshow(ct, cmap="gray", aspect="auto")
             if lab is not None:
@@ -137,25 +139,33 @@ def figures(stack, surf, reliable, frag, zf, zs, out):
             ax[i, j].plot(np.arange(800), surf[r, cs], color="yellow", lw=0.6)
             ax[i, j].set_title(f"{title} - row {r}, cols {c0}-{c0 + 800}", fontsize=9)
             ax[i, j].set_ylabel("layer")
-    fig.suptitle("Frag1 cross-sections: red = ink, blue = ignore, yellow = detected surface")
+    fig.suptitle(f"{name} cross-sections: red = ink, blue = ignore, yellow = detected surface")
     fig.tight_layout()
     fig.savefig(out / "cross_sections.png", dpi=110)
     plt.close(fig)
 
 
 def main():
-    out = OUT / "step3"
+    global SEARCH
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--frag", default="Frag1")
+    ap.add_argument("--search", type=int, nargs=2, default=SEARCH, help="layer range searched for the surface")
+    a = ap.parse_args()
+    SEARCH = tuple(a.search)
+    data, labels_out = frag_paths(a.frag)
+    out = OUT / ("step3" if a.frag == "Frag1" else f"step3_{a.frag}")
     out.mkdir(parents=True, exist_ok=True)
-    frag = load_png_mask("mask.png")
-    ink = load_png_mask("inklabels.png") & frag
-    stack = load_stack()
+    frag = load_png_mask("mask.png", data)
+    ink = load_png_mask("inklabels.png", data) & frag
+    stack = LazyStack(data)
 
     raw, surf, reliable = surface_map(stack, frag)
-    zf, zs, counts = build(stack.shape, frag, ink, surf, reliable)
-    tifffile.imwrite(LABELS_OUT / "surface.tif", surf, compression="zlib")
-    tifffile.imwrite(LABELS_OUT / "surface_reliable.tif", reliable.astype(np.uint8), compression="zlib")
+    zf, zs, counts = build(stack.shape, frag, ink, surf, reliable, labels_out)
+    tifffile.imwrite(labels_out / "surface.tif", surf, compression="zlib")
+    tifffile.imwrite(labels_out / "surface_reliable.tif", reliable.astype(np.uint8), compression="zlib")
 
     lines = [
+        f"{a.frag}: {stack.shape[0]} layers of {stack.shape[1]} x {stack.shape[2]}; surface search {SEARCH}",
         f"fragment pixels: {frag.sum():,}; ink (2D outline): {ink.sum():,}",
         f"reliable surface: {reliable[frag].mean():.1%} of fragment, {reliable[ink].mean():.1%} of ink outline",
         f"surface layer (smoothed, fragment): median {np.median(surf[frag]):.0f}, "
@@ -167,8 +177,8 @@ def main():
     ]
     print("\n".join(lines))
     (out / "summary.txt").write_text("\n".join(lines) + "\n")
-    figures(stack, surf, reliable, frag, zf, zs, out)
-    print(f"Labels in {LABELS_OUT}; figures in {out.resolve()}")
+    figures(stack, surf, reliable, frag, zf, zs, out, a.frag)
+    print(f"Labels in {labels_out}; figures in {out.resolve()}")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ def main():
         r = json.loads(p.read_text())
         a, b, c = r["a_ink_map"], r["b_depth"], r["c_ink_vs_surface"]
         rows.append(f"| {r['name']} | {f(a['auc'], a['auc_ci'])} | {f(a['ap'], a['ap_ci'])} | "
-                    f"{a['spearman_ir_darkness']:.3f} | {b['argmax_offset_median']:+.0f} | "
+                    f"{a['spearman_ir_darkness'] if a['spearman_ir_darkness'] is None else round(a['spearman_ir_darkness'], 3)} | {b['argmax_offset_median']:+.0f} | "
                     f"{f(b['share_argmax_within_5'], b['share_argmax_within_5_ci'])} | "
                     f"{f(c['surface_share'], c['surface_share_ci'])} | {f(c['band_auc'], c['band_auc_ci'])} |")
     head = ("| volume | (a) AUC | (a) AP* | (a) rho vs IR | (b) peak offset (median) | (b) peak within +-5 | "

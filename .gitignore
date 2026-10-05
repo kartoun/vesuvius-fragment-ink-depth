@@ -7,3 +7,4 @@ __pycache__/
 drafts/
 prior_work/
 outputs/step4_runs.log
+outputs/*.log

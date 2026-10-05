@@ -1,0 +1,8 @@
+Frag3: 65 layers of 7606 x 5249; surface search (10, 56)
+fragment pixels: 25,065,492; ink (2D outline): 3,172,435
+reliable surface: 74.2% of fragment, 82.0% of ink outline
+surface layer (smoothed, fragment): median 30, 5-95% 23-34
+voxels [not ink, ink, ignore]:
+  flat : [1410273540, 159078985, 1025700585]
+  shell: [1544878835, 24473690, 1025700585]
+ink voxels shell/flat: 0.154

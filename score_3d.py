@@ -114,7 +114,8 @@ def score(args):
     Zp, H, W = vol.shape
     frag = load_png_mask("mask.png", args.data)
     ink = load_png_mask("inklabels.png", args.data) & frag
-    ir = np.array(Image.open(args.data / "ir.png"), dtype=np.float32)
+    ir_path = args.data / "ir.png"  # not published for every fragment (e.g. Frag4)
+    ir = np.array(Image.open(ir_path), dtype=np.float32) if ir_path.exists() else None
     surf = tifffile.imread(args.ref / "surface.tif").astype(np.int32) - vol.z_offset
     reliable = tifffile.imread(args.ref / "surface_reliable.tif") > 0
     assert (H, W) == frag.shape, f"volume is {H}x{W}, fragment is {frag.shape}"
@@ -182,7 +183,7 @@ def score(args):
     sel = np.concatenate(pos + neg)
     y = np.r_[np.ones(pos[0].size), np.zeros(neg[0].size)].astype(np.uint8)
     sc = score2d.ravel()[sel]
-    dark = -ir.ravel()[sel]
+    dark = -ir.ravel()[sel] if ir is not None else None
     tiles = tile_id.ravel()[sel]
 
     def wauc(w):
@@ -196,7 +197,7 @@ def score(args):
         auc=float(roc_auc_score(y, sc)), auc_ci=boot(tiles, wauc, rng),
         ap=float(average_precision_score(y, sc)), ap_ci=boot(tiles, wap, rng),
         best_f05=best_f05(y, sc),
-        spearman_ir_darkness=float(spearmanr(sc, dark).statistic),
+        spearman_ir_darkness=float(spearmanr(sc, dark).statistic) if dark is not None else None,
     )
 
     # (b) depth of ink columns
@@ -270,7 +271,7 @@ def score(args):
     plt.close(fig)
 
     print(f"(a) AUC {res_a['auc']:.3f} {fmt(res_a['auc_ci'])}  AP {res_a['ap']:.3f} {fmt(res_a['ap_ci'])}  "
-          f"F0.5 {res_a['best_f05']:.3f}  rho(IR) {res_a['spearman_ir_darkness']:.3f}")
+          f"F0.5 {res_a['best_f05']:.3f}  rho(IR) {res_a['spearman_ir_darkness']}")
     print(f"(b) peak offset median {res_b['argmax_offset_median']:+.1f}  within +-5: "
           f"{res_b['share_argmax_within_5']:.1%} {fmt(res_b['share_argmax_within_5_ci'])}")
     print(f"(c) surface share {res_c['surface_share']:.3f} {fmt(res_c['surface_share_ci'])}  "
