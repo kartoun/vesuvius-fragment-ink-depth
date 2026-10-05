@@ -48,9 +48,33 @@ Run order: `python download_frag1.py [out_dir]`, then steps 1–4. Edit `DATA` /
    | flat, mean of 2 seeds | **0.750** | **0.486** | **0.507** | **0.299** | 40% |
    | surface band, mean of 2 seeds | 0.725 | 0.475 | 0.484 | 0.283 | 92% |
 
-   - The surface-band labels did **not** improve 2D ink detection; they were slightly worse on every metric in both seeds. That agrees with khj1222's result on scroll segments, now on IR-grounded fragment labels.
+   - The surface-band labels did **not** improve 2D ink detection; they were slightly worse on every metric in both seeds, though within noise (see 5). That agrees with khj1222's result on scroll segments, now on IR-grounded fragment labels.
    - They did confine predictions to the surface band. But the depth profiles show the band model gives high probability inside the band to **non-ink columns as well** (≈0.52 vs ≈0.63 for ink columns). What it mainly learned is *where the surface is*. That is the failure mode #192 warns about, so a surface band built from an intensity rule doesn't give "ink-only" 3D labels.
    - **Caveats:** the model is small and short-trained (AUC 0.75; khj1222's models are much stronger). There is one held-out band, two seeds, and one fragment.
+
+5. **Scoring with confidence intervals** (`score_3d.py`, held-out rows, 95% CIs from a block bootstrap over 256 × 256 tiles):
+   - The 2D gap between flat and surface-band models is **within noise**: AUC 0.73 [0.68, 0.78] for flat vs 0.71–0.73 [0.66, 0.77] for the band.
+   - Both kinds of model give clear-papyrus columns about 81–83% of the in-band signal that ink columns get (*surface share*).
+   - So the band labels changed *where* the model puts its output (99.8% of ink-column peaks within ±5 layers of the surface, vs 15% for flat), but not *how ink-specific* it is.
+   - Full table: [outputs/scores/summary.md](outputs/scores/summary.md).
+
+## Scoring tool: `score_3d.py`
+
+It scores any 3D ink prediction or 3D label volume in a fragment's surface-volume coordinates (`.zarr`, `.npy`, or a folder of per-layer `.tif`) against references that don't come from a model:
+
+| Score | Question it answers | Reference |
+|---|---|---|
+| **(a) ink map** | Does the volume, flattened by max over depth, find the ink? Reports ROC AUC, average precision, best F0.5 and Spearman vs IR darkness. | IR-traced ink outline (stroke edges ignored); `ir.png` |
+| **(b) depth** | Where in depth does it put ink? Reports the peak and centroid offset from the exposed surface, and the share of ink columns peaking within ±3 / ±5 layers. | Exposed-surface map (`surface.tif`, reliable pixels only) |
+| **(c) ink vs surface** | Inside the surface band (−4…+5), is the signal ink-specific or does it just mark the surface? *Surface share* = clear-papyrus mean / ink mean (0 = ink only, 1 = surface only); *band AUC* separates ink columns from clear ones by their in-band mean. | IR-traced ink core vs clear papyrus ≥ 20 px from any stroke |
+
+```bash
+python score_3d.py my_prediction.zarr --z-offset 12 --rows 3298:4432 --name my_model
+python score_3d.py labels.zarr --label-value 1 --name my_labels   # label volume: value 1 = ink
+python summarize_scores.py
+```
+
+`export_predictions.py` writes the step-4 models' 3D predictions in this format. Score (c) is the one that needs a ground-truth ink map, which is why fragments are useful here: on scroll segments there's no model-independent way to say which columns are clear papyrus.
 
 ## Limits
 
