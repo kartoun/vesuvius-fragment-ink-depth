@@ -1,0 +1,9 @@
+occlusion model: outputs/step5/Frag1_lofo_flat/model.pt (u8)
+cells_measured: 644
+cells_with_ink: 2076
+ink_share_measured: 0.33187004923820496
+median_center: 17.532199382781982
+median_half_width: 4.0
+center_p5_p95: [16.04466438293457, 21.361919403076172]
+v3 constant band: centre 17.53, half-width 4.00
+v4 centre minus exposed surface (ink px, reliable surface): median -11.47, IQR -13.47 to -9.47

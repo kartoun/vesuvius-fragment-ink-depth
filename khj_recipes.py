@@ -83,12 +83,14 @@ def sample_grid(grid, H, W):
 
 
 @torch.no_grad()
-def measure(run):
+def measure(model_path, norm):
     vol, frag, mu, sd = load_inputs()
+    if norm == "u8":  # step-5 models: per-fragment 0.5-99.5 percentile scaling to uint8, then (u8-127.5)/64
+        lo, hi = np.percentile(vol[:, frag][:, ::997].astype(np.float32), [0.5, 99.5])
     ink = load_png_mask("inklabels.png") & frag
     H, W = frag.shape
     model = UNet3D().cuda()
-    model.load_state_dict(torch.load(OUT / "step4" / run / "model.pt", map_location="cuda"))
+    model.load_state_dict(torch.load(model_path, map_location="cuda"))
     model.eval()
 
     depth = Z1 - Z0
@@ -101,7 +103,11 @@ def measure(run):
              if ink[y:y + TILE, x:x + TILE].any()]
     for n, (y, x) in enumerate(tiles):
         truth = ink[y:y + TILE, x:x + TILE].astype(np.float32)
-        xb = (torch.from_numpy(vol[:, y:y + TILE, x:x + TILE].astype(np.float32)).cuda() - mu) / sd
+        raw = torch.from_numpy(vol[:, y:y + TILE, x:x + TILE].astype(np.float32)).cuda()
+        if norm == "u8":
+            xb = (torch.floor(torch.clamp((raw - lo) * (255.0 / (hi - lo)), 0, 255)) - 127.5) / 64.0
+        else:
+            xb = (raw - mu) / sd
         batch = xb[None].repeat(len(starts) + 1, 1, 1, 1)
         for i, s in enumerate(starts, 1):
             batch[i, s:s + OCCLUDE] = 0.0
@@ -165,25 +171,35 @@ def write_labels(frag, ink, center_grid, width_grid, g_center, g_width):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", default="flat_seed0", help="step-4 run whose model measures the depth")
+    ap.add_argument("--model", default=None, help="explicit model.pt (e.g. a step-5 leave-one-out model)")
+    ap.add_argument("--norm", choices=["zscore", "u8"], default="zscore", help="input normalisation of that model")
+    ap.add_argument("--tag", default="", help="suffix for the output folder; with a tag no label volumes are written")
     a = ap.parse_args()
-    out = OUT / "khj_recipes"
+    out = OUT / ("khj_recipes" + (f"_{a.tag}" if a.tag else ""))
     out.mkdir(parents=True, exist_ok=True)
-    frag, ink, cg, wg, g_center, g_width, stats = measure(a.run)
+    model_path = a.model or (OUT / "step4" / a.run / "model.pt")
+    frag, ink, cg, wg, g_center, g_width, stats = measure(model_path, a.norm)
     np.savez_compressed(out / "inkdepth.npz", center=cg, half_width=wg)
-    c_full, w_full = write_labels(frag, ink, cg, wg, g_center, g_width)
+    if a.tag:
+        c_full = sample_grid(cg, *frag.shape)
+    else:
+        c_full, w_full = write_labels(frag, ink, cg, wg, g_center, g_width)
 
     import tifffile
     surf = tifffile.imread(LABELS_OUT / "surface.tif").astype(np.float32)
     rel = tifffile.imread(LABELS_OUT / "surface_reliable.tif") > 0
     m = ink & rel
     off = (c_full - surf)[m]
-    lines = [f"occlusion model: outputs/step4/{a.run}",
+    lines = [f"occlusion model: {model_path} ({a.norm})",
              *(f"{k}: {v}" for k, v in stats.items()),
              f"v3 constant band: centre {g_center:.2f}, half-width {g_width:.2f}",
              f"v4 centre minus exposed surface (ink px, reliable surface): median {np.median(off):+.2f}, "
              f"IQR {np.percentile(off, 25):+.2f} to {np.percentile(off, 75):+.2f}"]
     print("\n".join(lines))
     (out / "summary.txt").write_text("\n".join(lines) + "\n")
+
+    if a.tag:  # cross-section shows the written label volumes, which a tagged run does not write
+        return
 
     # one cross-section through the row with most ink
     r = int(np.argmax(ink.sum(axis=1)))
