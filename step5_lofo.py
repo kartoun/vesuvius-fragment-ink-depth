@@ -167,6 +167,10 @@ def main():
     ap.add_argument("--tag", default="lofo", help="name prefix for outputs (use e.g. test for quick tests)")
     a = ap.parse_args()
 
+    if sys.platform == "win32":  # ask Windows not to idle-sleep while this process runs (no settings changed)
+        import ctypes
+        ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+
     todo = [(f, arm) for f in a.folds for arm in a.arms
             if not (OUT / "scores" / f"{f}_{a.tag}_{arm}.json").exists()]
     if not todo:

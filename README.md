@@ -92,6 +92,23 @@ Run order: `python download_fragments.py Frag1 [Frag2 ...]`, then steps 1–4. S
    - Surface-band labels reliably move predictions to the surface but don't make them consistently more ink-specific. Frag5 and Frag2 hint in that direction, with overlapping or barely separated CIs.
    - **Caveat:** one small, briefly trained model from a single fragment. A train-on-five / test-on-the-sixth round is the fair baseline and is next.
 
+8. **Leave-one-fragment-out baseline** (`step5_lofo.py`). For each fragment, the same 3D U-Net (4,000 steps, seed 0) is trained on the other five and scored on the whole held-out fragment, once with flat labels and once with surface-band labels.
+
+   | held-out fragment | AUC flat / band | surface share flat / band | peak within ±5 flat / band |
+   |---|---|---|---|
+   | Frag1 | 0.654 / 0.656 | 0.870 / 0.825 | 44% / 99% |
+   | Frag2 | 0.577 / 0.604 | 0.934 [0.92, 0.95] / 0.866 [0.84, 0.90] | 35% / 97% |
+   | Frag3 | 0.609 / 0.620 | 0.935 / 0.928 | 29% / 100% |
+   | Frag4 | 0.566 / 0.577 | 0.972 / 0.969 | 17% / 100% |
+   | Frag5 | 0.652 / 0.669 | 0.896 / 0.830 | 38% / 100% |
+   | Frag6 | 0.689 / 0.658 | 0.888 / 0.887 | 46% / 99% |
+   | **mean** | **0.625 / 0.631** | **0.916 / 0.884** | |
+
+   - **Weak baseline.** Training on five fragments did not beat the Frag1-only models on unseen fragments. With this small, short-trained model, unseen fragments are read mostly as surface: surface share 0.83–0.97.
+   - **Surface-band vs flat labels.** The band labels give a lower surface share in 4 of 6 folds (equal in 2) and a higher AUC in 5 of 6. The difference is outside the 95% CIs only on Frag2, and 5 of 6 in one direction is not significant on its own (two-sided sign test p = 0.22).
+   - **Reading:** a small, consistent tilt toward more ink-specific predictions, not an established effect. This is the opposite sign to the single-fragment result in (4)–(5); only more folds, seeds or stronger models can settle it.
+   - **Use as a baseline:** these 12 rows are the reference other methods can be compared against on the same folds.
+
 ## Scoring tool: `score_3d.py`
 
 It scores any 3D ink prediction or 3D label volume in a fragment's surface-volume coordinates (`.zarr`, `.npy`, or a folder of per-layer `.tif`) against references that don't come from a model:
