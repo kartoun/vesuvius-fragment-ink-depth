@@ -10,7 +10,7 @@ On scroll segments, every existing 3D ink label depends on an ink model or on a 
 
 ## Related work (please read these first)
 
-- **khj1222**, [vesuvius-challenge](https://github.com/khj1222/vesuvius-challenge) and the #192 thread. They trained on plane, constant-band and per-pixel measured-band 3D labels on PHercParis4 segments `w00` and `w02`. The measured band lost to the constant band on both. They also found that villa's flat mode max-pools label depth before the loss.
+- **khj1222**, [vesuvius-challenge](https://github.com/khj1222/vesuvius-challenge) and the #192 thread. khj1222 has since checked our port of their recipe, updated their docs/12 with these numbers, and scored their own model with `score_3d.py` (see 9). They trained on plane, constant-band and per-pixel measured-band 3D labels on PHercParis4 segments `w00` and `w02`. The measured band lost to the constant band on both. They also found that villa's flat mode max-pools label depth before the loss.
 - **stantheman0128**: [ink3d depth validation](https://github.com/stantheman0128/vesuvius-ink3d-depth-validation) and [villa#1945](https://github.com/ScrollPrize/villa/pull/1945). Scores depths against an independent 1.129 µm rescan. This checks geometry, not ink identity.
 - [villa#923](https://github.com/ScrollPrize/villa/pull/923): CT-gated labels with a surface window. [villa#1295](https://github.com/ScrollPrize/villa/pull/1295): closed because brightness-placed depths weren't validated against an independent 3D reference. [villa#1714](https://github.com/ScrollPrize/villa/pull/1714): a tool for painting ink layer by layer.
 - Team caveat (pmh47, #192): intensity edges aren't always the recto surface, and ink can look "peeled away".
@@ -108,6 +108,18 @@ Run order: `python download_fragments.py Frag1 [Frag2 ...]`, then steps 1–4. S
    - **Surface-band vs flat labels.** The band labels give a lower surface share in 4 of 6 folds (equal in 2) and a higher AUC in 5 of 6. The difference is outside the 95% CIs only on Frag2, and 5 of 6 in one direction is not significant on its own (two-sided sign test p = 0.22).
    - **Reading:** a small, consistent tilt toward more ink-specific predictions, not an established effect. This is the opposite sign to the single-fragment result in (4)–(5); only more folds, seeds or stronger models can settle it.
    - **Use as a baseline:** these 12 rows are the reference other methods can be compared against on the same folds.
+
+9. **External entry: a scroll-trained model on Frag1** (reported by [khj1222](https://github.com/khj1222), included with permission). This is the `w00` occluder from [khj1222/vesuvius-challenge docs/11](https://github.com/khj1222/vesuvius-challenge/blob/main/docs/11_measured_3d_labels.md), trained on one PHerc. Paris 4 segment at 7.91 µm. khj1222 ran it themselves and scored it with `score_3d.py` (a) on the whole fragment. The checkpoint is not published; the source is their comments ([result](https://github.com/ScrollPrize/villa/issues/192#issuecomment-6037820818), [entry details](https://github.com/ScrollPrize/villa/issues/192#issuecomment-6075223909)).
+
+   | variant (fixed before running) | (a) ROC AUC on Frag1 [95% CI] |
+   |---|---|
+   | native 3.24 µm | 0.521 [0.494, 0.556] |
+   | resampled to 7.91 µm | 0.565 [0.523, 0.610] |
+   | *post hoc:* layer order reversed, native / resampled | 0.578 / 0.553 |
+
+   - **Context:** the same inference code gives AUC 0.95 on held-out regions of the segment it was trained on, so the low score comes from the model, not the pipeline. For comparison, the leave-one-fragment-out model trained on Frag2–6 scores 0.654 on Frag1.
+   - **Reading:** a strong segment-trained model does not transfer to an IR-imaged fragment without adaptation.
+   - **Consequence for this benchmark:** fragments are useful as a depth reference only with models that actually read ink on them, which today means fragment-trained or adapted ones.
 
 ## Scoring tool: `score_3d.py`
 
