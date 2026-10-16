@@ -8,3 +8,5 @@ drafts/
 prior_work/
 outputs/step4_runs.log
 outputs/*.log
+# private submission records (contain email); never publish
+Submitted*/
